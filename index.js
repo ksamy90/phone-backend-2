@@ -1,37 +1,10 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 const app = express();
+const Phone = require("./models/phone");
 
-let persons = [
-  {
-    id: 1,
-    name: "Arto Hellas",
-    number: "040-123456",
-  },
-  {
-    id: 2,
-    name: "Ada Lovelace",
-    number: "39-44-5323523",
-  },
-  {
-    id: 3,
-    name: "Dan Abramov",
-    number: "12-43-234345",
-  },
-  {
-    id: 4,
-    name: "Mary Poppendieck",
-    number: "39-23-6423122",
-  },
-];
-
-// const requestLogger = (request, response, next) => {
-//   console.log("method", request.method);
-//   console.log("body", request.body);
-//   console.log("path", request.path);
-//   next();
-// };
 const unknownEndpoint = (request, response) => {
   response.status(404).send({ error: "unknown endpoint" });
 };
@@ -44,55 +17,81 @@ app.use(
 app.use(express.json());
 app.use(express.static("build"));
 app.use(cors());
-// app.use(requestLogger);
 
 app.get("/api/persons", (request, response) => {
-  response.status(200).json(persons);
-});
-
-app.get("/info", (request, response) => {
-  const num = persons.length;
-  const date = new Date();
-  response.send(`<p>Phonebook has info for ${num} people</p><p>${date}</p>`);
+  Phone.find({}).then((result) => {
+    response.status(200).json(result);
+  });
 });
 
 app.get("/api/persons/:id", (request, response) => {
-  const id = Number(request.params.id);
-  const person = persons.find((person) => person.id === id);
-  if (person) {
-    response.status(200).json(person);
-  }
-  response.status(404).send("person not found");
+  Phone.findById(request.params.id)
+    .then((person) => {
+      response.status(200).json(person);
+    })
+    .catch((err) => {
+      response.status(404).send("person not found");
+    });
 });
 
-app.delete("/api/persons/:id", (request, response) => {
-  const id = Number(request.params.id);
-  persons = persons.filter((person) => person.id !== id);
-  response.status(204).send("no content");
+app.delete("/api/persons/:id", (request, response, next) => {
+  Phone.findByIdAndRemove(request.params.id)
+    .then((person) => {
+      if (person) {
+        response.status(204).send("no content");
+      }
+    })
+    .catch((err) => next(err));
 });
 
-const userExists = (name) => {
-  return persons.some((phone) => phone.name === name);
-};
+// const userExists = (name) => {
+//   return persons.some((phone) => phone.name === name);
+// };
 
-app.post("/api/persons", (request, response) => {
-  const personId = persons.length;
+app.post("/api/persons", (request, response, next) => {
   const body = request.body;
   if (!body.name || !body.number) {
     return response.status(400).send("bad request, name or number missing");
   }
-  if (userExists(body.name)) {
-    return response.status(400).json({ error: "name must be unique" });
-  }
+  // if (userExists(body.name)) {
+  //   return response.status(400).json({ error: "name must be unique" });
+  // }
   const person = {
-    id: personId + 1,
     name: body.name,
     number: body.number,
   };
-  persons = [...persons, person];
-  response.status(201).json(person);
+  const newPerson = new Phone(person);
+  newPerson
+    .save()
+    .then((returnedPerson) => {
+      response.status(201).json(returnedPerson);
+    })
+    .catch((err) => next(err));
+});
+app.put("/api/persons/:id", (request, response, next) => {
+  const body = request.body;
+  const phone = {
+    name: body.name,
+    number: body.number,
+  };
+  Phone.findByIdAndUpdate(request.params.id, phone, { new: true })
+    .then((updatedPerson) => {
+      response.status(200).json(updatedPerson);
+    })
+    .catch((err) => next(err));
 });
 app.use(unknownEndpoint);
+
+const errorHandler = (error, request, response, next) => {
+  console.log(error.message);
+  if (error.name === "CastError") {
+    return response.status(400).send({ error: "malformatted id" });
+  } else if (error.name === "ValidationError") {
+    return response.status(400).send({ error: error.message });
+  }
+  next(error);
+};
+app.use(errorHandler);
 
 const PORT = 3001;
 app.listen(PORT);
